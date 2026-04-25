@@ -1,44 +1,66 @@
-#include <reg51.h> // Standard 8051 Header
+// LDR sensor pin assignments
+const int ldr1 = A0;
+const int ldr2 = A1;
+const int ldr3 = A2;
+const int ldr4 = A3;
 
-// Define Headlight Pins
-sbit Left_Headlight = P2^0;
-sbit Right_Headlight = P2^1;
+// Headlight LED pin assignments
+const int led1 = 3;
+const int led2 = 5;
 
-// Define Sensor Pins (Using P1.0 to P1.3)
-// Note: In hardware, if using LDRs without an external ADC, 
-// they are usually connected to an LM358 comparator first.
-sbit Sensor1 = P1^0;
-sbit Sensor2 = P1^1;
-sbit Sensor3 = P1^2;
-sbit Sensor4 = P1^3;
+// Calibration Constants
+int threshold = 800; // Trigger point for dimming
+bool ledState = true; // High beam status (true = ON)
 
-void delay(unsigned int ms) {
-    unsigned int i, j;
-    for(i = 0; i < ms; i++)
-        for(j = 0; j < 1275; j++); // Approximation for 1ms at 11.0592 MHz
+/**
+ * Filters sensor noise by taking 5 consecutive samples.
+ * This prevents the headlights from reacting to tiny sparks or light glitches.
+ */
+int readLDR(int pin) {
+  int total = 0;
+  for (int i = 0; i < 5; i++) {
+    total += analogRead(pin);
+    delay(3);
+  }
+  return total / 5;
 }
 
-void main() {
-    // Initialize Ports
-    P1 = 0xFF; // Set Port 1 as Input
-    P2 = 0x00; // Set Port 2 as Output (Initial state: OFF)
+void setup() {
+  pinMode(led1, OUTPUT);
+  pinMode(led2, OUTPUT);
+  Serial.begin(9600);
+}
 
-    while(1) {
-        /* Logic: Sensors are Active High (Input = 1 when light is detected).
-           If any sensor detects high-intensity light (OR Logic), 
-           turn OFF the headlights.
-        */
-        if (Sensor1 == 1 || Sensor2 == 1 || Sensor3 == 1 || Sensor4 == 1) {
-            // Glare detected: Switch to Low Beam (Headlights OFF)
-            Left_Headlight = 0;
-            Right_Headlight = 0;
-        } 
-        else {
-            // No glare: Keep High Beam ON
-            Left_Headlight = 1;
-            Right_Headlight = 1;
-        }
-        
-        delay(10); // Small stability delay
-    }
+void loop() {
+  // Capture smoothed readings from all 4 sensors
+  int v1 = readLDR(ldr1);
+  int v2 = readLDR(ldr2);
+  int v3 = readLDR(ldr3);
+  int v4 = readLDR(ldr4);
+
+  // Compute the spatial average across the sensor array
+  int avg = (v1 + v2 + v3 + v4) / 4;
+
+  // Debugging output for Serial Plotter
+  Serial.print("Sensor_Average: ");
+  Serial.println(avg);
+
+  /**
+   * HYSTERESIS LOGIC:
+   * Prevents "chatter" or rapid ON/OFF switching.
+   * Headlights turn OFF only when avg > 850.
+   * Headlights turn back ON only when avg < 750.
+   */
+  if (ledState && avg > threshold + 50) {
+    ledState = false;   // Turn OFF (Oncoming glare detected)
+  } 
+  else if (!ledState && avg < threshold - 50) {
+    ledState = true;    // Turn ON (Road is clear)
+  }
+
+  // Actuate Headlights
+  digitalWrite(led1, ledState ? HIGH : LOW);
+  digitalWrite(led2, ledState ? HIGH : LOW);
+
+  delay(100);
 }
